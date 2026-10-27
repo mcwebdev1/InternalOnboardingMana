@@ -29,6 +29,12 @@ export async function requireProfile() {
   return profile
 }
 
+export async function requireIntern() {
+  const profile = await requireProfile()
+  if (isStaff(profile.role)) redirect("/admin")
+  return profile
+}
+
 export async function requireAdmin() {
   const profile = await requireProfile()
   if (!isStaff(profile.role)) redirect("/onboarding")
