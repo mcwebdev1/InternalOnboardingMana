@@ -5,8 +5,11 @@ export type Module = Tables<"modules">
 export type ModuleLink = Tables<"module_links">
 export type Assignment = Tables<"assignments">
 export type InternManager = Tables<"intern_managers">
+export type Schedule = Tables<"schedules">
+export type TimeLog = Tables<"time_logs">
 export type UserRole = Enums<"user_role">
 export type AssignmentStatus = Enums<"assignment_status">
+export type ScheduleStatus = Enums<"schedule_status">
 
 export const STATUS_LABELS: Record<AssignmentStatus, string> = {
   not_started: "Assigned",

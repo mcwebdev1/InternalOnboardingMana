@@ -231,11 +231,121 @@ export type Database = {
         }
         Relationships: []
       }
+      schedules: {
+        Row: {
+          created_at: string
+          day: string
+          end_time: string | null
+          expected_hours: number
+          id: string
+          intern_id: string
+          start_time: string | null
+          status: Database["public"]["Enums"]["schedule_status"]
+          updated_at: string
+          updated_by: string | null
+          week_start: string
+        }
+        Insert: {
+          created_at?: string
+          day: string
+          end_time?: string | null
+          expected_hours?: never
+          id?: string
+          intern_id: string
+          start_time?: string | null
+          status: Database["public"]["Enums"]["schedule_status"]
+          updated_at?: string
+          updated_by?: string | null
+          week_start?: never
+        }
+        Update: {
+          created_at?: string
+          day?: string
+          end_time?: string | null
+          expected_hours?: never
+          id?: string
+          intern_id?: string
+          start_time?: string | null
+          status?: Database["public"]["Enums"]["schedule_status"]
+          updated_at?: string
+          updated_by?: string | null
+          week_start?: never
+        }
+        Relationships: [
+          {
+            foreignKeyName: "schedules_intern_id_fkey"
+            columns: ["intern_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "schedules_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      time_logs: {
+        Row: {
+          actual_hours: number | null
+          clock_in: string
+          clock_out: string | null
+          created_at: string
+          id: string
+          intern_id: string
+          updated_at: string
+          updated_by: string | null
+          work_date: string
+        }
+        Insert: {
+          actual_hours?: never
+          clock_in: string
+          clock_out?: string | null
+          created_at?: string
+          id?: string
+          intern_id: string
+          updated_at?: string
+          updated_by?: string | null
+          work_date?: never
+        }
+        Update: {
+          actual_hours?: never
+          clock_in?: string
+          clock_out?: string | null
+          created_at?: string
+          id?: string
+          intern_id?: string
+          updated_at?: string
+          updated_by?: string | null
+          work_date?: never
+        }
+        Relationships: [
+          {
+            foreignKeyName: "time_logs_intern_id_fkey"
+            columns: ["intern_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "time_logs_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      clock_in: { Args: never; Returns: string }
+      clock_out: { Args: never; Returns: string }
       create_intern: {
         Args: { p_email: string; p_full_name: string; p_manager_ids?: string[] }
         Returns: Json
@@ -245,9 +355,12 @@ export type Database = {
         Returns: Json
       }
       delete_intern: { Args: { p_user_id: string }; Returns: undefined }
+      delete_manager: { Args: { p_user_id: string }; Returns: undefined }
+      google_access_facts: { Args: never; Returns: Json }
     }
     Enums: {
       assignment_status: "not_started" | "in_progress" | "completed"
+      schedule_status: "available" | "unavailable" | "remote" | "out"
       user_role: "admin" | "intern" | "master"
     }
     CompositeTypes: {
