@@ -93,12 +93,39 @@ export async function unclaimIntern(internId: string) {
 }
 
 export async function deleteInternAccount(userId: string) {
-  await requireAdmin()
+  const admin = await requireAdmin()
   const supabase = await createClient()
+
+  // delete_intern enforces this too. A regular admin removes only their interns.
+  if (!isMaster(admin.role)) {
+    const { data: link } = await supabase
+      .from("intern_managers")
+      .select("intern_id")
+      .eq("intern_id", userId)
+      .eq("manager_id", admin.id)
+      .maybeSingle()
+    if (!link) return { error: "You can only remove interns on your team." }
+  }
+
   const { error } = await supabase.rpc("delete_intern", {
     p_user_id: userId,
   })
   if (error) return { error: error.message }
   revalidatePeople(userId)
+  return { success: true }
+}
+
+// Master only. delete_manager also refuses masters, the caller, and demo
+// accounts, and revokes an allowlisted Google address.
+export async function deleteManagerAccount(userId: string) {
+  const master = await requireMaster()
+  if (userId === master.id) return { error: "You cannot remove your own account." }
+
+  const supabase = await createClient()
+  const { error } = await supabase.rpc("delete_manager", {
+    p_user_id: userId,
+  })
+  if (error) return { error: error.message }
+  revalidatePeople()
   return { success: true }
 }
