@@ -357,6 +357,10 @@ export type Database = {
       delete_intern: { Args: { p_user_id: string }; Returns: undefined }
       delete_manager: { Args: { p_user_id: string }; Returns: undefined }
       google_access_facts: { Args: never; Returns: Json }
+      my_managers: {
+        Args: never
+        Returns: { email: string; full_name: string | null }[]
+      }
     }
     Enums: {
       assignment_status: "not_started" | "in_progress" | "completed"
