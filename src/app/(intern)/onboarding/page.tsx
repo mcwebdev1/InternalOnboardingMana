@@ -1,10 +1,12 @@
 import { EmptyState } from "@/components/empty-state"
 import { ModuleCard, type AssignedModule } from "@/components/modules/module-card"
 import { ProgressRing } from "@/components/modules/progress-ring"
+import { UpcomingWeekBanner } from "@/components/schedule/upcoming-week-banner"
 import { requireProfile } from "@/lib/auth"
+import { isWeekSet, localToday, upcomingWeekStart } from "@/lib/schedule"
 import { displayLogin } from "@/lib/login"
 import { createClient } from "@/lib/supabase/server"
-import { internManagerProfiles, managersLabel, sortModuleLinks, type Module, type ModuleLink } from "@/lib/types"
+import { managersLabel, sortModuleLinks, type Module, type ModuleLink } from "@/lib/types"
 
 export const metadata = {
   title: "My onboarding",
@@ -14,33 +16,46 @@ export default async function OnboardingPage() {
   const profile = await requireProfile()
   const supabase = await createClient()
 
-  const [{ data }, { data: internManagers }, { data: managers }] = await Promise.all([
+  const upcomingWeek = upcomingWeekStart(localToday())
+
+  const [{ data }, { data: myManagers }, upcomingDays] = await Promise.all([
     supabase
       .from("assignments")
       .select("id, status, module:modules(*, links:module_links(*))")
       .eq("intern_id", profile.id)
       .order("created_at", { ascending: true }),
-    supabase.from("intern_managers").select("intern_id, manager_id").eq("intern_id", profile.id),
-    supabase.from("profiles").select("*").in("role", ["admin", "master"]),
+    // Interns can read only their own managers' name and email.
+    supabase.rpc("my_managers"),
+    profile.role === "intern"
+      ? supabase
+          .from("schedules")
+          .select("day")
+          .eq("intern_id", profile.id)
+          .eq("week_start", upcomingWeek)
+      : null,
   ])
 
-  const internManagersList = internManagerProfiles(
-    managers ?? [],
-    internManagers ?? [],
-    profile.id
-  )
+  const showScheduleBanner =
+    upcomingDays !== null &&
+    !upcomingDays.error &&
+    !isWeekSet(
+      (upcomingDays.data ?? []).map((row) => row.day),
+      upcomingWeek
+    )
+
+  const internManagersList = myManagers ?? []
 
   const modules = (data ?? [])
     .map((row) => {
-      const module = (
+      const assignedModule = (
         Array.isArray(row.module) ? row.module[0] : row.module
       ) as (Module & { links?: ModuleLink[] | null }) | null
-      if (!module) return null
+      if (!assignedModule) return null
       return {
-        ...module,
+        ...assignedModule,
         assignmentId: row.id,
         status: row.status,
-        links: sortModuleLinks(module.links),
+        links: sortModuleLinks(assignedModule.links),
       } satisfies AssignedModule
     })
     .filter((row): row is AssignedModule => row !== null)
@@ -51,6 +66,8 @@ export default async function OnboardingPage() {
 
   return (
     <div className="space-y-8">
+      {showScheduleBanner ? <UpcomingWeekBanner weekStart={upcomingWeek} /> : null}
+
       <section className="flex flex-col gap-6 rounded-2xl bg-card px-5 py-6 ring-1 ring-foreground/10 sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div>
           <p className="text-sm text-muted-foreground">Welcome back</p>

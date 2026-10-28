@@ -9,13 +9,17 @@ import { displayLogin } from "@/lib/login"
 import { isStaff, roleLabel, type Profile } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-const internLinks = [{ href: "/onboarding", label: "My modules" }]
+const internLinks = [
+  { href: "/onboarding", label: "My modules" },
+  { href: "/schedule", label: "Schedule" },
+]
 
 const adminLinks = [
   { href: "/admin", label: "Overview" },
   { href: "/admin/people", label: "Interns" },
   { href: "/admin/modules", label: "Modules" },
   { href: "/admin/assign", label: "Assign" },
+  { href: "/admin/schedule", label: "Schedule" },
 ]
 
 export function AppHeader({ profile }: { profile: Profile }) {

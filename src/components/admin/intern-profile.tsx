@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowLeft, UserMinus, UserPlus } from "lucide-react"
 import { toast } from "sonner"
-import { claimIntern, unclaimIntern } from "@/lib/actions/people"
+import { claimIntern, setInternManagers, unclaimIntern } from "@/lib/actions/people"
 import { saveInternAssignments } from "@/lib/actions/assignments"
 import { displayLogin } from "@/lib/login"
 import {
@@ -23,6 +23,8 @@ import {
   ClaimManagerDialog,
   type ClaimDialogMode,
 } from "@/components/admin/claim-manager-dialog"
+import { ManagerPicker } from "@/components/admin/manager-select"
+import { RoleSelect } from "@/components/admin/role-select"
 import { StatusBadge } from "@/components/modules/status-badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -42,6 +44,8 @@ export function InternProfile({
   assignments,
   currentAdminId,
   currentRole,
+  managers,
+  canChangeRoles,
 }: {
   intern: Profile
   internManagersList: Profile[]
@@ -50,6 +54,8 @@ export function InternProfile({
   assignments: AssignmentView[]
   currentAdminId: string
   currentRole: UserRole
+  managers: Profile[]
+  canChangeRoles: boolean
 }) {
   const router = useRouter()
   const isMine = isManagedBy(internManagers, intern.id, currentAdminId)
@@ -121,6 +127,7 @@ export function InternProfile({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {canChangeRoles ? <RoleSelect person={intern} /> : null}
           {isMine ? (
             <Button
               type="button"
@@ -145,6 +152,16 @@ export function InternProfile({
           )}
         </div>
       </section>
+
+      {isMaster(currentRole) ? (
+        <InternManagersEditor
+          // Start over when the links change, for example after Assign to me.
+          key={internManagersList.map((manager) => manager.id).join(",")}
+          intern={intern}
+          managers={managers}
+          linkedIds={internManagersList.map((manager) => manager.id)}
+        />
+      ) : null}
 
       <section className="space-y-4">
         <div>
@@ -259,5 +276,52 @@ export function InternProfile({
         />
       ) : null}
     </div>
+  )
+}
+
+// Master only. Managers add or remove only themselves with Assign to me.
+function InternManagersEditor({
+  intern,
+  managers,
+  linkedIds,
+}: {
+  intern: Profile
+  managers: Profile[]
+  linkedIds: string[]
+}) {
+  const router = useRouter()
+  const [selected, setSelected] = useState(linkedIds)
+  const [pending, startTransition] = useTransition()
+  const changed =
+    selected.length !== linkedIds.length || selected.some((id) => !linkedIds.includes(id))
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold tracking-tight">Managers</h2>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+          As master you can link any manager to {internName(intern)}.
+        </p>
+      </div>
+      <ManagerPicker managers={managers} value={selected} onChange={setSelected} />
+      <Button
+        type="button"
+        className="h-11 cursor-pointer px-5"
+        disabled={pending || !changed}
+        onClick={() => {
+          startTransition(async () => {
+            const result = await setInternManagers(intern.id, selected)
+            if ("error" in result) {
+              toast.error(result.error)
+              return
+            }
+            toast.success(`Managers updated for ${internName(intern)}`)
+            router.refresh()
+          })
+        }}
+      >
+        {pending ? "Saving..." : "Save managers"}
+      </Button>
+    </section>
   )
 }
