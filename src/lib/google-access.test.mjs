@@ -71,14 +71,24 @@ describe("decideGoogleAccess", () => {
     assert.equal(result.allowed, false)
   })
 
-  test("denies when the profile is missing or has another role or email", () => {
+  test("denies when the profile is missing or has another email", () => {
     assert.equal(decideGoogleAccess({ ...vlad, profile_role: null }).allowed, false)
-    assert.equal(decideGoogleAccess({ ...vlad, profile_role: "intern" }).allowed, false)
-    assert.equal(decideGoogleAccess({ ...vlad, profile_role: "master" }).allowed, false)
+    assert.equal(decideGoogleAccess({ ...vlad, profile_role: "owner" }).allowed, false)
     assert.equal(
       decideGoogleAccess({ ...vlad, profile_email: "marie@manacommon.com" }).allowed,
       false
     )
+  })
+
+  test("keeps a role the master changed after the first sign in", () => {
+    assert.deepEqual(decideGoogleAccess({ ...vlad, profile_role: "master" }), {
+      allowed: true,
+      role: "master",
+    })
+    assert.deepEqual(decideGoogleAccess({ ...vlad, profile_role: "intern" }), {
+      allowed: true,
+      role: "intern",
+    })
   })
 
   test("never trusts a role that is not admin or master", () => {
