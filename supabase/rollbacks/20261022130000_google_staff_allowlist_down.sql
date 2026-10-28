@@ -1,5 +1,6 @@
 -- Rollback for migrations/20261022130000_google_staff_allowlist.sql.
--- Run only if migration 9 must be undone. Paste and run the whole file in the
+-- Run only if migration 9 must be undone. If migration 10 is applied, run
+-- 20261027120000_access_rules_down.sql first. Paste and run the whole file in the
 -- Supabase SQL editor.
 --
 -- This cannot bring back:
@@ -8,16 +9,33 @@
 --   - Managers removed with delete_manager.
 --   - Profile roles the migration or a Google sign in synced to the allowlist.
 --
--- After this runs, the old handle_new_user is back: public email sign up works
--- again, and the first account without a role becomes master if none exists.
--- Google sign in is refused by the app callback, because google_access_facts
--- is gone, and Remove on a manager fails, because delete_manager is gone.
+-- After this runs, accounts are still invite only: handle_new_user refuses
+-- any new account without an onboarding_role, so public sign up and new
+-- Google sign ups stay closed, and there is no first-user-is-master fallback.
+-- Google sign in is also refused by the app callback, because
+-- google_access_facts is gone, and Remove on a manager fails, because
+-- delete_manager is gone. Staff Google accounts can set a password again.
 -- The revokes on create_invited_user and handle_new_user stay in place, since
 -- create or replace keeps them and the old functions never needed them.
 
+-- Migration 10 calls is_google_master, which this file drops. Undo 10 first.
+do $$
+begin
+  if exists (
+    select 1 from pg_trigger
+    where tgname = 'profiles_role_changed'
+      and tgrelid = 'public.profiles'::regclass
+  ) then
+    raise exception 'Migration 10 is still applied. Run supabase/rollbacks/20261027120000_access_rules_down.sql first, then run this file again.';
+  end if;
+end;
+$$;
+
+drop trigger if exists on_auth_user_password_change on auth.users;
 drop trigger if exists on_auth_user_email_change on auth.users;
 drop trigger if exists on_auth_identity_saved on auth.identities;
 
+drop function if exists private.guard_auth_password_change();
 drop function if exists private.guard_auth_email_change();
 drop function if exists private.guard_google_identity();
 drop function if exists public.google_access_facts();
@@ -25,7 +43,8 @@ drop function if exists private.google_access_facts();
 drop function if exists public.delete_manager(uuid);
 drop function if exists private.delete_manager(uuid);
 
--- From 20260921151000_intern_managers_and_invites.sql.
+-- Based on 20260921151000_intern_managers_and_invites.sql, but still invite
+-- only: no public sign up and no first-user-is-master fallback.
 create or replace function private.handle_new_user()
 returns trigger
 language plpgsql
@@ -33,14 +52,13 @@ security definer
 set search_path = public
 as $$
 declare
-  assigned_role public.user_role := 'intern';
+  assigned_role public.user_role;
   requested_role text := coalesce(new.raw_app_meta_data ->> 'onboarding_role', '');
 begin
-  if requested_role in ('admin', 'master', 'intern') then
-    assigned_role := requested_role::public.user_role;
-  elsif not exists (select 1 from public.profiles where role = 'master') then
-    assigned_role := 'master';
+  if requested_role not in ('admin', 'master', 'intern') then
+    raise exception 'Accounts are created by invite only';
   end if;
+  assigned_role := requested_role::public.user_role;
 
   insert into public.profiles (id, email, full_name, role)
   values (
@@ -195,6 +213,7 @@ end;
 $$;
 
 -- Nothing above calls these any more.
+drop function if exists private.is_google_master();
 drop function if exists private.is_reserved_staff_email(text);
 drop function if exists private.google_staff_role(text, text, boolean);
 drop table if exists private.staff_allowlist;

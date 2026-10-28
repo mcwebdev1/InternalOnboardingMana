@@ -64,7 +64,8 @@ as $$
 $$;
 
 -- True for any allowlisted email, revoked or not. These addresses never get
--- a PIN or password account.
+-- a PIN account, and guard_auth_password_change below refuses any password
+-- set on them later.
 create or replace function private.is_reserved_staff_email(p_email text)
 returns boolean
 language sql
@@ -146,6 +147,8 @@ $$;
 -- covers GoTrue linking Google to an existing account with the same email,
 -- such as an invited intern, which never inserts into auth.users. It also
 -- re-checks on every later Google sign in, so a revoked address stops working.
+-- It never changes the profile role. The allowlist sets the starting role in
+-- handle_new_user, and after that only a master changes roles.
 create or replace function private.guard_google_identity()
 returns trigger
 language plpgsql
@@ -182,12 +185,6 @@ begin
     raise exception 'This Google account does not match its Mana Onboarding profile';
   end if;
 
-  -- The allowlist decides staff roles for these addresses.
-  update public.profiles
-  set role = allowed_role
-  where id = new.user_id
-    and role is distinct from allowed_role;
-
   return new;
 end;
 $$;
@@ -197,10 +194,12 @@ create trigger on_auth_identity_saved
   before insert or update on auth.identities
   for each row execute function private.guard_google_identity();
 
--- A PIN or password account cannot move its auth email onto a staff address,
--- either directly or as a pending email change. Otherwise Google would later
--- link the real staff member to that account and the guard above would lock
--- them out.
+-- No account can move its auth email onto a staff address, either directly
+-- or as a pending email change. Otherwise Google would later link the real
+-- staff member to that account and the guard above would lock them out. This
+-- covers Google accounts too, so one staff member cannot take another's
+-- address. The only exemption is a Google account moving onto the email of
+-- its own Google identity.
 create or replace function private.guard_auth_email_change()
 returns trigger
 language plpgsql
@@ -208,20 +207,25 @@ security definer
 set search_path = ''
 as $$
 begin
-  if exists (
-    select 1 from auth.identities i
-    where i.user_id = new.id and i.provider = 'google'
-  ) then
-    return new;
-  end if;
-
   if lower(trim(coalesce(new.email, ''))) is distinct from lower(trim(coalesce(old.email, '')))
-     and private.is_reserved_staff_email(new.email) then
+     and private.is_reserved_staff_email(new.email)
+     and not exists (
+       select 1 from auth.identities i
+       where i.user_id = new.id
+         and i.provider = 'google'
+         and lower(trim(coalesce(i.identity_data ->> 'email', ''))) = lower(trim(coalesce(new.email, '')))
+     ) then
     raise exception 'That email signs in with Google only';
   end if;
 
   if lower(trim(coalesce(new.email_change, ''))) is distinct from lower(trim(coalesce(old.email_change, '')))
-     and private.is_reserved_staff_email(new.email_change) then
+     and private.is_reserved_staff_email(new.email_change)
+     and not exists (
+       select 1 from auth.identities i
+       where i.user_id = new.id
+         and i.provider = 'google'
+         and lower(trim(coalesce(i.identity_data ->> 'email', ''))) = lower(trim(coalesce(new.email_change, '')))
+     ) then
     raise exception 'That email signs in with Google only';
   end if;
 
@@ -233,6 +237,65 @@ drop trigger if exists on_auth_user_email_change on auth.users;
 create trigger on_auth_user_email_change
   before update of email, email_change on auth.users
   for each row execute function private.guard_auth_email_change();
+
+-- Staff accounts sign in with Google only. Setting or changing a password on
+-- an allowlisted address, or on any account with a Google identity, is
+-- refused, so a staff session cannot add a password login that outlives their
+-- Google account. Inserts are not checked: new accounts are covered by
+-- handle_new_user and create_invited_user.
+create or replace function private.guard_auth_password_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if private.is_reserved_staff_email(old.email)
+     or exists (
+       select 1 from auth.identities i
+       where i.user_id = new.id and i.provider = 'google'
+     ) then
+    raise exception 'Staff accounts sign in with Google only and cannot have a password';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_password_change on auth.users;
+create trigger on_auth_user_password_change
+  before update of encrypted_password on auth.users
+  for each row
+  when (old.encrypted_password is distinct from new.encrypted_password)
+  execute function private.guard_auth_password_change();
+
+-- True when the caller is a master who signed in with Google: their profile
+-- role is master and they hold a verified, allowlisted, not revoked Google
+-- identity for their own profile email. The demo master password login never
+-- counts. Revoking a staff Google account and changing roles need this.
+create or replace function private.is_google_master()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.profiles p
+    join auth.identities i
+      on i.user_id = p.id
+     and i.provider = 'google'
+    where p.id = auth.uid()
+      and p.role = 'master'
+      and lower(p.email) = lower(trim(coalesce(i.identity_data ->> 'email', '')))
+      and private.google_staff_role(
+        'google',
+        i.identity_data ->> 'email',
+        lower(coalesce(i.identity_data ->> 'email_verified', '')) = 'true'
+      ) is not null
+  );
+$$;
 
 -- Profile emails mirror auth emails and the allowlist matches on them, so
 -- nobody changes one through the API.
@@ -424,19 +487,7 @@ begin
 
   -- Revoking a staff Google account cannot be undone in the app, so only the
   -- Google master may do it, never the demo master password login.
-  if private.is_reserved_staff_email(target.email) and not exists (
-    select 1
-    from auth.identities i
-    join public.profiles p on p.id = i.user_id
-    where i.user_id = auth.uid()
-      and i.provider = 'google'
-      and lower(p.email) = lower(i.identity_data ->> 'email')
-      and private.google_staff_role(
-        'google',
-        i.identity_data ->> 'email',
-        lower(coalesce(i.identity_data ->> 'email_verified', '')) = 'true'
-      ) = 'master'
-  ) then
+  if private.is_reserved_staff_email(target.email) and not private.is_google_master() then
     raise exception 'Only the Google master can remove a staff Google account';
   end if;
 
@@ -496,8 +547,9 @@ as $$
   select private.google_access_facts();
 $$;
 
--- Bring any Google profile created before this migration in line with the
--- allowlist. Accounts not on it are removed below.
+-- One time only: bring any Google profile created before this migration in
+-- line with the allowlist. Sign ins never sync roles after this. Accounts not
+-- on the allowlist are removed below.
 update public.profiles p
 set role = a.role
 from auth.identities i
@@ -532,6 +584,7 @@ where exists (
 
 revoke all on function private.google_staff_role(text, text, boolean) from public;
 revoke all on function private.is_reserved_staff_email(text) from public;
+revoke all on function private.is_google_master() from public, anon, authenticated;
 revoke all on function private.delete_manager(uuid) from public;
 revoke all on function private.google_access_facts() from public;
 revoke all on function public.delete_manager(uuid) from public, anon;
@@ -541,6 +594,7 @@ revoke all on function private.create_invited_user(text, text, text, public.user
 revoke all on function private.handle_new_user() from public, anon, authenticated;
 revoke all on function private.guard_google_identity() from public, anon, authenticated;
 revoke all on function private.guard_auth_email_change() from public, anon, authenticated;
+revoke all on function private.guard_auth_password_change() from public, anon, authenticated;
 
 grant execute on function private.delete_manager(uuid) to authenticated;
 grant execute on function private.google_access_facts() to authenticated;
