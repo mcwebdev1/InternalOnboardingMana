@@ -27,6 +27,7 @@ import {
   type UserRole,
 } from "@/lib/types"
 import { ManagerPicker } from "@/components/admin/manager-select"
+import { RoleSelect } from "@/components/admin/role-select"
 import { InternScopeToggle } from "@/components/admin/intern-scope-toggle"
 import { InviteCredentialsDialog } from "@/components/admin/invite-credentials-dialog"
 import {
@@ -60,12 +61,14 @@ export function PeopleManager({
   internManagers,
   currentAdminId,
   currentRole,
+  canChangeRoles,
 }: {
   people: InternProgress[]
   managers: Profile[]
   internManagers: ManagerLink[]
   currentAdminId: string
   currentRole: UserRole
+  canChangeRoles: boolean
 }) {
   const [scope, setScope] = useState<"all" | "mine">("all")
   const mine = people.filter(({ intern }) =>
@@ -86,7 +89,11 @@ export function PeopleManager({
         </div>
         <div className="flex flex-wrap gap-2">
           {master ? <CreateManagerDialog /> : null}
-          <CreateInternDialog managers={managers} defaultManagerId={currentAdminId} />
+          <CreateInternDialog
+            managers={managers}
+            defaultManagerId={currentAdminId}
+            canPickManagers={master}
+          />
         </div>
       </div>
 
@@ -125,7 +132,13 @@ export function PeopleManager({
         </>
       )}
 
-      {master ? <ManagersSection managers={managers} currentAdminId={currentAdminId} /> : null}
+      {master ? (
+        <ManagersSection
+          managers={managers}
+          currentAdminId={currentAdminId}
+          canChangeRoles={canChangeRoles}
+        />
+      ) : null}
     </div>
   )
 }
@@ -260,9 +273,11 @@ function ProgressCount({ label, value }: { label: string; value: number }) {
 function CreateInternDialog({
   managers,
   defaultManagerId,
+  canPickManagers,
 }: {
   managers: Profile[]
   defaultManagerId: string
+  canPickManagers: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [pending, startTransition] = useTransition()
@@ -289,7 +304,9 @@ function CreateInternDialog({
             <DialogTitle>Invite intern</DialogTitle>
             <DialogDescription>
               Use their email. We generate a 6-digit PIN they sign in with.
-              Choose one or more managers.
+              {canPickManagers
+                ? " Choose one or more managers."
+                : " You will be their manager."}
             </DialogDescription>
           </DialogHeader>
           <form
@@ -301,7 +318,7 @@ function CreateInternDialog({
                 const result = await createInternAccount({
                   email: String(form.get("email") ?? ""),
                   fullName: String(form.get("full_name") ?? ""),
-                  managerIds,
+                  managerIds: canPickManagers ? managerIds : [defaultManagerId],
                 })
                 if ("error" in result) {
                   toast.error(result.error)
@@ -327,14 +344,16 @@ function CreateInternDialog({
               <Label htmlFor="full_name">Full name</Label>
               <Input id="full_name" name="full_name" className="h-11" placeholder="Intern 4" />
             </div>
-            <div className="space-y-2">
-              <Label>Managers</Label>
-              <ManagerPicker
-                managers={managers}
-                value={managerIds}
-                onChange={setManagerIds}
-              />
-            </div>
+            {canPickManagers ? (
+              <div className="space-y-2">
+                <Label>Managers</Label>
+                <ManagerPicker
+                  managers={managers}
+                  value={managerIds}
+                  onChange={setManagerIds}
+                />
+              </div>
+            ) : null}
             <DialogFooter>
               <Button type="submit" className="h-11 cursor-pointer px-4" disabled={pending}>
                 {pending ? "Creating..." : "Create account"}
@@ -467,9 +486,11 @@ function DeleteInternButton({ intern }: { intern: Profile }) {
 function ManagersSection({
   managers,
   currentAdminId,
+  canChangeRoles,
 }: {
   managers: Profile[]
   currentAdminId: string
+  canChangeRoles: boolean
 }) {
   return (
     <section className="space-y-3">
@@ -478,6 +499,9 @@ function ManagersSection({
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           Only the master admin adds and removes managers. Master and demo accounts
           cannot be removed.
+          {canChangeRoles
+            ? " You can change anyone's role except your own."
+            : " Roles can be changed by a master signed in with Google."}
         </p>
       </div>
       <ul className="divide-y divide-border overflow-hidden rounded-xl ring-1 ring-foreground/10">
@@ -501,11 +525,16 @@ function ManagersSection({
                   {displayLogin(manager.email)} · {roleLabel(manager.role)}
                 </p>
               </div>
-              {locked ? (
-                <span className="text-sm text-muted-foreground">{locked}</span>
-              ) : (
-                <RemoveManagerButton manager={manager} />
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {canChangeRoles && manager.id !== currentAdminId ? (
+                  <RoleSelect person={manager} />
+                ) : null}
+                {locked ? (
+                  <span className="text-sm text-muted-foreground">{locked}</span>
+                ) : (
+                  <RemoveManagerButton manager={manager} />
+                )}
+              </div>
             </li>
           )
         })}

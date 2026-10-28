@@ -45,7 +45,10 @@ export function sortModuleLinks(links: ModuleLink[] | null | undefined) {
   return [...(links ?? [])].sort((a, b) => a.sort_order - b.sort_order)
 }
 
-export function internName(intern: Profile) {
+// Any person with a name and email, including the managers an intern sees.
+export type PersonName = Pick<Profile, "full_name" | "email">
+
+export function internName(intern: PersonName) {
   return intern.full_name ?? intern.email.replace(/@mana\.internal$/i, "")
 }
 
@@ -64,7 +67,7 @@ export function internManagerProfiles(
   return managers.filter((manager) => ids.has(manager.id))
 }
 
-export function managersLabel(managers: Profile[]) {
+export function managersLabel(managers: PersonName[]) {
   if (managers.length === 0) return "No manager"
   return managers.map(internName).join(", ")
 }

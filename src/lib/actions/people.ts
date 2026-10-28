@@ -1,8 +1,10 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { requireAdmin, requireMaster } from "@/lib/auth"
+import { canLinkManager, isUserRole, managerIdsError, roleChangeError } from "@/lib/access"
+import { isGoogleMasterSession, requireAdmin, requireMaster } from "@/lib/auth"
 import { parseInviteResult, type InviteCredentials } from "@/lib/invite"
+import { isUUID } from "@/lib/schedule"
 import { createClient } from "@/lib/supabase/server"
 import { isMaster } from "@/lib/types"
 
@@ -19,7 +21,11 @@ export async function createInternAccount(input: {
   fullName: string
   managerIds: string[]
 }): Promise<{ error: string } | { success: true; invite: InviteCredentials }> {
-  await requireAdmin()
+  const admin = await requireAdmin()
+  // create_intern enforces this too. An admin can only add themselves.
+  const managerError = managerIdsError(admin, input.managerIds)
+  if (managerError) return { error: managerError }
+
   const supabase = await createClient()
   const { data, error } = await supabase.rpc("create_intern", {
     p_email: input.email,
@@ -50,12 +56,19 @@ export async function createManagerAccount(input: {
   return { success: true, invite }
 }
 
+// An admin links only themselves. Master links any manager. The
+// intern_managers insert policy enforces the same rule.
 export async function addInternManager(internId: string, managerId?: string) {
   const admin = await requireAdmin()
+  const targetId = managerId ?? admin.id
+  if (!canLinkManager(admin, targetId)) {
+    return { error: "Only the master admin can add other managers." }
+  }
+
   const supabase = await createClient()
   const { error } = await supabase.from("intern_managers").insert({
     intern_id: internId,
-    manager_id: managerId ?? admin.id,
+    manager_id: targetId,
     created_by: admin.id,
   })
   if (error) {
@@ -73,7 +86,7 @@ export async function claimIntern(internId: string) {
 export async function removeInternManager(internId: string, managerId?: string) {
   const admin = await requireAdmin()
   const targetId = managerId ?? admin.id
-  if (targetId !== admin.id && !isMaster(admin.role)) {
+  if (!canLinkManager(admin, targetId)) {
     return { error: "You can only remove yourself as a manager." }
   }
 
@@ -90,6 +103,72 @@ export async function removeInternManager(internId: string, managerId?: string) 
 
 export async function unclaimIntern(internId: string) {
   return removeInternManager(internId)
+}
+
+// Master only: replace an intern's managers with exactly this list.
+export async function setInternManagers(internId: string, managerIds: string[]) {
+  const master = await requireMaster()
+  if (!isUUID(internId) || !managerIds.every(isUUID)) {
+    return { error: "That intern or manager was not found." }
+  }
+
+  const supabase = await createClient()
+  const { data: links, error: linksError } = await supabase
+    .from("intern_managers")
+    .select("manager_id")
+    .eq("intern_id", internId)
+  if (linksError) return { error: linksError.message }
+
+  const current = new Set((links ?? []).map((link) => link.manager_id))
+  const next = new Set(managerIds)
+  const toAdd = [...next].filter((id) => !current.has(id))
+  const toRemove = [...current].filter((id) => !next.has(id))
+
+  if (toAdd.length) {
+    const { error } = await supabase.from("intern_managers").insert(
+      toAdd.map((managerId) => ({
+        intern_id: internId,
+        manager_id: managerId,
+        created_by: master.id,
+      }))
+    )
+    if (error) return { error: error.message }
+  }
+
+  if (toRemove.length) {
+    const { error } = await supabase
+      .from("intern_managers")
+      .delete()
+      .eq("intern_id", internId)
+      .in("manager_id", toRemove)
+    if (error) return { error: error.message }
+  }
+
+  revalidatePeople(internId)
+  return { success: true }
+}
+
+// Only a master signed in with Google changes roles, never their own. The
+// profiles trigger enforces the same rule and drops manager links that no
+// longer fit the new role.
+export async function changeUserRole(userId: string, role: string) {
+  const master = await requireMaster()
+  const googleMaster = await isGoogleMasterSession(master)
+  const roleError = roleChangeError({ ...master, googleMaster }, userId, role)
+  if (roleError) return { error: roleError }
+  if (!isUUID(userId) || !isUserRole(role)) return { error: "That account was not found." }
+
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({ role })
+    .eq("id", userId)
+    .select("id")
+  if (error) return { error: error.message }
+  if (!data?.length) return { error: "That account was not found." }
+
+  revalidatePath("/", "layout")
+  return { success: true }
 }
 
 export async function deleteInternAccount(userId: string) {

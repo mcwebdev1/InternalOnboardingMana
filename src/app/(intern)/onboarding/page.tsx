@@ -6,7 +6,7 @@ import { requireProfile } from "@/lib/auth"
 import { isWeekSet, localToday, upcomingWeekStart } from "@/lib/schedule"
 import { displayLogin } from "@/lib/login"
 import { createClient } from "@/lib/supabase/server"
-import { internManagerProfiles, managersLabel, sortModuleLinks, type Module, type ModuleLink } from "@/lib/types"
+import { managersLabel, sortModuleLinks, type Module, type ModuleLink } from "@/lib/types"
 
 export const metadata = {
   title: "My onboarding",
@@ -18,14 +18,14 @@ export default async function OnboardingPage() {
 
   const upcomingWeek = upcomingWeekStart(localToday())
 
-  const [{ data }, { data: internManagers }, { data: managers }, upcomingDays] = await Promise.all([
+  const [{ data }, { data: myManagers }, upcomingDays] = await Promise.all([
     supabase
       .from("assignments")
       .select("id, status, module:modules(*, links:module_links(*))")
       .eq("intern_id", profile.id)
       .order("created_at", { ascending: true }),
-    supabase.from("intern_managers").select("intern_id, manager_id").eq("intern_id", profile.id),
-    supabase.from("profiles").select("*").in("role", ["admin", "master"]),
+    // Interns can read only their own managers' name and email.
+    supabase.rpc("my_managers"),
     profile.role === "intern"
       ? supabase
           .from("schedules")
@@ -43,11 +43,7 @@ export default async function OnboardingPage() {
       upcomingWeek
     )
 
-  const internManagersList = internManagerProfiles(
-    managers ?? [],
-    internManagers ?? [],
-    profile.id
-  )
+  const internManagersList = myManagers ?? []
 
   const modules = (data ?? [])
     .map((row) => {

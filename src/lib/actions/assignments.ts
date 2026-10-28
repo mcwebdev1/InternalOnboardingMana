@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { requireAdmin, requireProfile } from "@/lib/auth"
+import { managedInternError, requireAdmin, requireProfile } from "@/lib/auth"
 import { isStaff } from "@/lib/types"
 import { createClient } from "@/lib/supabase/server"
 import type { Enums } from "@/lib/database.types"
@@ -11,6 +11,10 @@ export async function saveInternAssignments(
   moduleIds: string[]
 ) {
   const admin = await requireAdmin()
+  // RLS enforces this too: only interns the caller manages.
+  const scopeError = await managedInternError(admin, internId)
+  if (scopeError) return { error: scopeError }
+
   const supabase = await createClient()
 
   const { data: existing, error: existingError } = await supabase
@@ -69,6 +73,17 @@ export async function updateAssignmentStatus(
 ) {
   const profile = await requireProfile()
   const supabase = await createClient()
+
+  if (isStaff(profile.role)) {
+    const { data: assignment } = await supabase
+      .from("assignments")
+      .select("intern_id")
+      .eq("id", assignmentId)
+      .maybeSingle()
+    if (!assignment) return { error: "That module was not found." }
+    const scopeError = await managedInternError(profile, assignment.intern_id)
+    if (scopeError) return { error: scopeError }
+  }
 
   const patch = {
     status,
