@@ -9,10 +9,11 @@ import {
   createInternAccount,
   createManagerAccount,
   deleteInternAccount,
+  deleteManagerAccount,
   unclaimIntern,
 } from "@/lib/actions/people"
 import type { InviteCredentials } from "@/lib/invite"
-import { displayLogin } from "@/lib/login"
+import { displayLogin, isDemoStaffLogin } from "@/lib/login"
 import {
   STATUS_LABELS,
   internManagerProfiles,
@@ -20,11 +21,13 @@ import {
   isManagedBy,
   isMaster,
   managersLabel,
+  roleLabel,
   type ManagerLink,
   type Profile,
   type UserRole,
 } from "@/lib/types"
 import { ManagerPicker } from "@/components/admin/manager-select"
+import { RoleSelect } from "@/components/admin/role-select"
 import { InternScopeToggle } from "@/components/admin/intern-scope-toggle"
 import { InviteCredentialsDialog } from "@/components/admin/invite-credentials-dialog"
 import {
@@ -58,12 +61,14 @@ export function PeopleManager({
   internManagers,
   currentAdminId,
   currentRole,
+  canChangeRoles,
 }: {
   people: InternProgress[]
   managers: Profile[]
   internManagers: ManagerLink[]
   currentAdminId: string
   currentRole: UserRole
+  canChangeRoles: boolean
 }) {
   const [scope, setScope] = useState<"all" | "mine">("all")
   const mine = people.filter(({ intern }) =>
@@ -84,14 +89,18 @@ export function PeopleManager({
         </div>
         <div className="flex flex-wrap gap-2">
           {master ? <CreateManagerDialog /> : null}
-          <CreateInternDialog managers={managers} defaultManagerId={currentAdminId} />
+          <CreateInternDialog
+            managers={managers}
+            defaultManagerId={currentAdminId}
+            canPickManagers={master}
+          />
         </div>
       </div>
 
       {people.length === 0 ? (
         <EmptyState
           title="No intern accounts yet"
-          description="Invite an intern with their work email. They get a 6-digit PIN and can also sign in with Google."
+          description="Invite an intern with their email. They sign in with that email and a 6-digit PIN."
         />
       ) : (
         <>
@@ -115,12 +124,21 @@ export function PeopleManager({
                   managers={managers}
                   internManagers={internManagers}
                   currentAdminId={currentAdminId}
+                  canRemove={master || isManagedBy(internManagers, row.intern.id, currentAdminId)}
                 />
               ))}
             </ul>
           )}
         </>
       )}
+
+      {master ? (
+        <ManagersSection
+          managers={managers}
+          currentAdminId={currentAdminId}
+          canChangeRoles={canChangeRoles}
+        />
+      ) : null}
     </div>
   )
 }
@@ -130,11 +148,13 @@ function InternRow({
   managers,
   internManagers,
   currentAdminId,
+  canRemove,
 }: {
   row: InternProgress
   managers: Profile[]
   internManagers: ManagerLink[]
   currentAdminId: string
+  canRemove: boolean
 }) {
   const { intern, assigned, started, finished } = row
   const internManagersList = internManagerProfiles(managers, internManagers, intern.id)
@@ -160,7 +180,7 @@ function InternRow({
           isMine={isMine}
           hasManagers={internManagersList.length > 0}
         />
-        <DeleteInternButton intern={intern} />
+        {canRemove ? <DeleteInternButton intern={intern} /> : null}
       </div>
     </li>
   )
@@ -253,9 +273,11 @@ function ProgressCount({ label, value }: { label: string; value: number }) {
 function CreateInternDialog({
   managers,
   defaultManagerId,
+  canPickManagers,
 }: {
   managers: Profile[]
   defaultManagerId: string
+  canPickManagers: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [pending, startTransition] = useTransition()
@@ -281,8 +303,10 @@ function CreateInternDialog({
           <DialogHeader>
             <DialogTitle>Invite intern</DialogTitle>
             <DialogDescription>
-              Use their work email. We generate a 6-digit PIN they can use until
-              they sign in with Google. Choose one or more managers.
+              Use their email. We generate a 6-digit PIN they sign in with.
+              {canPickManagers
+                ? " Choose one or more managers."
+                : " You will be their manager."}
             </DialogDescription>
           </DialogHeader>
           <form
@@ -294,7 +318,7 @@ function CreateInternDialog({
                 const result = await createInternAccount({
                   email: String(form.get("email") ?? ""),
                   fullName: String(form.get("full_name") ?? ""),
-                  managerIds,
+                  managerIds: canPickManagers ? managerIds : [defaultManagerId],
                 })
                 if ("error" in result) {
                   toast.error(result.error)
@@ -320,14 +344,16 @@ function CreateInternDialog({
               <Label htmlFor="full_name">Full name</Label>
               <Input id="full_name" name="full_name" className="h-11" placeholder="Intern 4" />
             </div>
-            <div className="space-y-2">
-              <Label>Managers</Label>
-              <ManagerPicker
-                managers={managers}
-                value={managerIds}
-                onChange={setManagerIds}
-              />
-            </div>
+            {canPickManagers ? (
+              <div className="space-y-2">
+                <Label>Managers</Label>
+                <ManagerPicker
+                  managers={managers}
+                  value={managerIds}
+                  onChange={setManagerIds}
+                />
+              </div>
+            ) : null}
             <DialogFooter>
               <Button type="submit" className="h-11 cursor-pointer px-4" disabled={pending}>
                 {pending ? "Creating..." : "Create account"}
@@ -342,7 +368,7 @@ function CreateInternDialog({
           if (!next) setInvite(null)
         }}
         title="Intern invited"
-        description="Share this email and PIN. They should switch to Google sign in with the same email when they can."
+        description="Share this email and PIN. The PIN is shown only once."
         invite={invite}
       />
     </>
@@ -367,8 +393,8 @@ function CreateManagerDialog() {
           <DialogHeader>
             <DialogTitle>Invite manager</DialogTitle>
             <DialogDescription>
-              Use their work email. They get a 6-digit PIN and can sign in with
-              Google using that same email.
+              Use their email. They get a 6-digit PIN to sign in with. Mana
+              staff on the Google list sign in with Google and do not need an invite.
             </DialogDescription>
           </DialogHeader>
           <form
@@ -424,7 +450,7 @@ function CreateManagerDialog() {
           if (!next) setInvite(null)
         }}
         title="Manager invited"
-        description="Share this email and PIN. They should sign in with Google using the same email when they can."
+        description="Share this email and PIN. The PIN is shown only once."
         invite={invite}
       />
     </>
@@ -454,5 +480,122 @@ function DeleteInternButton({ intern }: { intern: Profile }) {
       <Trash2 className="size-4" />
       <span className="sr-only">Remove {internName(intern)}</span>
     </Button>
+  )
+}
+
+function ManagersSection({
+  managers,
+  currentAdminId,
+  canChangeRoles,
+}: {
+  managers: Profile[]
+  currentAdminId: string
+  canChangeRoles: boolean
+}) {
+  return (
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-lg font-semibold tracking-tight">Managers</h2>
+        <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+          Only the master admin adds and removes managers. Master and demo accounts
+          cannot be removed.
+          {canChangeRoles
+            ? " You can change anyone's role except your own."
+            : " Roles can be changed by a master signed in with Google."}
+        </p>
+      </div>
+      <ul className="divide-y divide-border overflow-hidden rounded-xl ring-1 ring-foreground/10">
+        {managers.map((manager) => {
+          const locked =
+            manager.id === currentAdminId
+              ? "You"
+              : manager.role === "master"
+                ? "Master account"
+                : isDemoStaffLogin(manager.email)
+                  ? "Demo account"
+                  : null
+          return (
+            <li
+              key={manager.id}
+              className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="min-w-0">
+                <p className="font-medium">{internName(manager)}</p>
+                <p className="text-sm text-muted-foreground">
+                  {displayLogin(manager.email)} · {roleLabel(manager.role)}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {canChangeRoles && manager.id !== currentAdminId ? (
+                  <RoleSelect person={manager} />
+                ) : null}
+                {locked ? (
+                  <span className="text-sm text-muted-foreground">{locked}</span>
+                ) : (
+                  <RemoveManagerButton manager={manager} />
+                )}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
+function RemoveManagerButton({ manager }: { manager: Profile }) {
+  const [open, setOpen] = useState(false)
+  const [pending, startTransition] = useTransition()
+  const name = internName(manager)
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" className="h-11 cursor-pointer px-4">
+          <Trash2 className="size-4" />
+          Remove
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Remove {name}?</DialogTitle>
+          <DialogDescription className="leading-6">
+            Their account is deleted and they lose access right away. Interns they
+            managed stay, with any other managers. If they sign in with Google, their
+            address stays blocked until it is restored in Supabase.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 cursor-pointer px-4"
+            disabled={pending}
+            onClick={() => setOpen(false)}
+          >
+            Keep manager
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            className="h-11 cursor-pointer px-4"
+            disabled={pending}
+            onClick={() => {
+              startTransition(async () => {
+                const result = await deleteManagerAccount(manager.id)
+                if ("error" in result) {
+                  toast.error(result.error)
+                  return
+                }
+                setOpen(false)
+                toast.success(`${name} was removed`)
+              })
+            }}
+          >
+            {pending ? "Removing..." : "Remove manager"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { resolveLogin } from "@/lib/login"
+import { resolveLogin, safeNextPath } from "@/lib/login"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -59,7 +59,7 @@ export function LoginForm({
       return
     }
 
-    router.replace(nextPath.startsWith("/") ? nextPath : "/")
+    router.replace(safeNextPath(nextPath, window.location.origin))
     router.refresh()
   }
 
@@ -111,8 +111,8 @@ export function LoginForm({
           {pending ? "Signing in..." : "Continue with email"}
         </Button>
         <p className="text-xs leading-5 text-muted-foreground">
-          Google is the usual way in. New people get a 6-digit PIN by invite until they
-          sign in with Google. Demo accounts still use their existing logins.
+          Continue with Google is for Mana staff. Interns sign in with the email and
+          6-digit PIN from their invite. Demo accounts use their existing logins.
         </p>
       </form>
     </div>

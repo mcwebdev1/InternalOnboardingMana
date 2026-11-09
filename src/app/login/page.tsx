@@ -31,7 +31,7 @@ export default async function LoginPage({
           <BrandLogo size={72} />
           <CardTitle className="mt-4 text-2xl">Mana Onboarding</CardTitle>
           <CardDescription className="max-w-sm text-sm leading-6">
-            Sign in with Google. Interns only see the modules a manager sends them.
+            Staff sign in with Google. Interns use the email and PIN from their invite.
           </CardDescription>
         </CardHeader>
         <CardContent className="pb-8">

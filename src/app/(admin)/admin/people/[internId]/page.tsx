@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation"
 import { InternProfile } from "@/components/admin/intern-profile"
-import { requireAdmin } from "@/lib/auth"
+import { isGoogleMasterSession, requireAdmin } from "@/lib/auth"
 import { internManagerProfiles } from "@/lib/types"
 import { createClient } from "@/lib/supabase/server"
 
@@ -17,8 +17,14 @@ export default async function InternProfilePage({
   const admin = await requireAdmin()
   const supabase = await createClient()
 
-  const [{ data: intern }, { data: modules }, { data: assignments }, { data: managers }, { data: internManagers }] =
-    await Promise.all([
+  const [
+    { data: intern },
+    { data: modules },
+    { data: assignments },
+    { data: managers },
+    { data: internManagers },
+    canChangeRoles,
+  ] = await Promise.all([
       supabase.from("profiles").select("*").eq("id", internId).maybeSingle(),
       supabase.from("modules").select("*").order("sort_order").order("title"),
       supabase
@@ -27,6 +33,7 @@ export default async function InternProfilePage({
         .eq("intern_id", internId),
       supabase.from("profiles").select("*").in("role", ["admin", "master"]).order("email"),
       supabase.from("intern_managers").select("intern_id, manager_id").eq("intern_id", internId),
+      isGoogleMasterSession(admin),
     ])
 
   if (!intern || intern.role !== "intern") notFound()
@@ -40,6 +47,8 @@ export default async function InternProfilePage({
       assignments={assignments ?? []}
       currentAdminId={admin.id}
       currentRole={admin.role}
+      managers={managers ?? []}
+      canChangeRoles={canChangeRoles}
     />
   )
 }

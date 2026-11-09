@@ -1,5 +1,5 @@
 import { PeopleManager } from "@/components/admin/people-manager"
-import { requireAdmin } from "@/lib/auth"
+import { isGoogleMasterSession, requireAdmin } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 
 export const metadata = {
@@ -9,12 +9,18 @@ export const metadata = {
 export default async function AdminPeoplePage() {
   const admin = await requireAdmin()
   const supabase = await createClient()
-  const [{ data: interns }, { data: managers }, { data: internManagers }, { data: assignments }] =
-    await Promise.all([
+  const [
+    { data: interns },
+    { data: managers },
+    { data: internManagers },
+    { data: assignments },
+    canChangeRoles,
+  ] = await Promise.all([
       supabase.from("profiles").select("*").eq("role", "intern").order("email"),
       supabase.from("profiles").select("*").in("role", ["admin", "master"]).order("email"),
       supabase.from("intern_managers").select("intern_id, manager_id"),
       supabase.from("assignments").select("intern_id, status"),
+      isGoogleMasterSession(admin),
     ])
 
   const people = (interns ?? []).map((intern) => {
@@ -34,6 +40,7 @@ export default async function AdminPeoplePage() {
       internManagers={internManagers ?? []}
       currentAdminId={admin.id}
       currentRole={admin.role}
+      canChangeRoles={canChangeRoles}
     />
   )
 }

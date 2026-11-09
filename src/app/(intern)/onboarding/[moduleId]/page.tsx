@@ -26,12 +26,12 @@ export default async function ModulePage({
     .eq("module_id", moduleId)
     .maybeSingle()
 
-  const module = (
+  const assignedModule = (
     Array.isArray(data?.module) ? data?.module[0] : data?.module
   ) as (Module & { links?: ModuleLink[] | null }) | null
-  if (!data || !module) notFound()
+  if (!data || !assignedModule) notFound()
 
-  const links = sortModuleLinks(module.links)
+  const links = sortModuleLinks(assignedModule.links)
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -44,10 +44,10 @@ export default async function ModulePage({
       </Link>
 
       <article className="rounded-2xl bg-card px-5 py-6 ring-1 ring-foreground/10 sm:px-8 sm:py-8">
-        <h1 className="text-3xl font-semibold tracking-tight">{module.title}</h1>
-        {module.description ? (
+        <h1 className="text-3xl font-semibold tracking-tight">{assignedModule.title}</h1>
+        {assignedModule.description ? (
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            {module.description}
+            {assignedModule.description}
           </p>
         ) : null}
 
